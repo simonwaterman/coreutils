@@ -222,6 +222,8 @@ static int progress_len;
 /* True if input is seekable.  */
 static bool input_seekable;
 
+static ssize_t ifile_size = 0;
+
 /* Error number corresponding to initial attempt to lseek input.
    If ESPIPE, do not issue any more diagnostics about it.  */
 static int input_seek_errno;
@@ -1123,6 +1125,16 @@ static ssize_t
 iread_fullblock (int fd, char *buf, size_t size)
 {
   ssize_t nread = 0;
+
+  if (ifile_size && input_seekable) {
+    size_t curr = lseek(fd, 0, SEEK_CUR);
+    if (curr + size > ifile_size) {
+      int old_flags = fcntl (fd, F_GETFL);
+      if (fcntl (fd, F_SETFL, old_flags & ~O_DIRECT) != 0)
+        error (0, errno, _("failed to turn off O_DIRECT: %s"),
+               quotef (input_file));
+    }
+  }
 
   while (0 < size)
     {
@@ -2388,6 +2400,17 @@ main (int argc, char **argv)
   input_seekable = (0 <= offset);
   input_offset = MAX (0, offset);
   input_seek_errno = errno;
+
+  if (input_seekable)
+    {
+      ifile_size = lseek(STDIN_FILENO, 0, SEEK_END);
+      if (ifile_size < 0)
+        die (EXIT_FAILURE, errno, _("failed to find size of %s"),
+             quoteaf (input_file));
+      if (lseek(STDIN_FILENO, 0, SEEK_SET) < 0)
+        die (EXIT_FAILURE, errno, _("failed to seek to start of file %s"),
+             quoteaf (input_file));
+    }
 
   if (output_file == NULL)
     {
